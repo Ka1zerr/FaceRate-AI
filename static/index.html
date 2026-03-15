@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FaceRate AI — ИИ-оценка лица</title>
+  <meta name="description"
+    content="Загрузи селфи и получи ИИ-оценку пропорций лица от 1 до 10. Анализ на основе Face Mesh." />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Syne:wght@600;700;800&display=swap"
+    rel="stylesheet">
+  <link href="https://db.onlinewebfonts.com/c/ef1fa16fbd9b3b8431e5138f6d49cb00?family=Rodchenko" rel="stylesheet"
+    type="text/css" />
+  <link rel="stylesheet" href="style.css?v=3" />
+</head>
+
+<body>
+  <div class="app-wrapper">
+
+    <!-- Header -->
+    <header class="header">
+      <h1 class="logo">FaceRate AI</h1>
+      <p class="tagline">ИИ-анализ пропорций лица</p>
+    </header>
+
+    <!-- Main card -->
+    <main class="card" id="mainCard">
+
+      <!-- Upload -->
+      <div class="upload-zone" id="uploadZone">
+        <span class="upload-icon">📸</span>
+        <p class="upload-text">
+          Перетащите фото сюда<br />
+          или <strong>нажмите для выбора</strong>
+        </p>
+        <input type="file" id="fileInput" accept="image/*" />
+      </div>
+
+      <!-- Preview -->
+      <div class="preview-container" id="previewContainer">
+        <img class="preview-img" id="previewImg" alt="preview" />
+        <button class="btn-analyze" id="analyzeBtn" type="button">
+          <span class="btn-label">Анализировать</span>
+          <span class="spinner"></span>
+        </button>
+      </div>
+
+      <!-- Error -->
+      <div class="error-msg" id="errorMsg"></div>
+
+      <!-- Results -->
+      <div class="results" id="results">
+        <!-- Score ring -->
+        <div class="score-ring">
+          <svg viewBox="0 0 140 140">
+            <circle class="ring-bg" cx="70" cy="70" r="65" />
+            <circle class="ring-fg" id="ringFg" cx="70" cy="70" r="65" />
+          </svg>
+          <div class="score-value">
+            <span class="score-number" id="scoreNumber">0</span>
+            <span class="score-label">ИЗ 10</span>
+          </div>
+        </div>
+
+        <p class="verdict" id="verdictText"></p>
+
+        <!-- Traits breakdown -->
+        <div class="traits-list" id="traitsList"></div>
+      </div>
+
+    </main>
+
+    <footer class="footer">FaceRate AI &copy; 2026 — Powered by MediaPipe</footer>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+
+</html>
