@@ -67,14 +67,15 @@ LEFT_MOUTH = 61
 RIGHT_MOUTH = 291
 
 # Canonical 3D face model points (approximate metric positions in mm)
-# Convention: Y-down (matches OpenCV image coordinates), Z-forward (into face)
+# Convention: Y-down (image coordinates), Z-away from camera (into face)
+# Nose tip is the most protruding point (Z=0), everything else is behind it (Z>0)
 _CANONICAL_3D_POINTS = np.array([
-    [0.0,     0.0,     0.0],     # Nose tip (1)
-    [0.0,    63.6,   -12.5],     # Chin (152) — below nose → positive Y
-    [-43.3, -32.7,   -26.0],     # Left eye outer (33) — above nose → negative Y
-    [43.3,  -32.7,   -26.0],     # Right eye outer (263) — above nose → negative Y
-    [-28.9,  28.9,   -24.1],     # Left mouth corner (61) — below nose → positive Y
-    [28.9,   28.9,   -24.1],     # Right mouth corner (291) — below nose → positive Y
+    [0.0,     0.0,     0.0],     # Nose tip (1) — most protruding
+    [0.0,    63.6,    12.5],     # Chin (152) — below nose, behind nose
+    [-43.3, -32.7,    26.0],     # Left eye outer (33) — above nose, behind nose
+    [43.3,  -32.7,    26.0],     # Right eye outer (263) — above nose, behind nose
+    [-28.9,  28.9,    24.1],     # Left mouth corner (61) — below nose, behind nose
+    [28.9,   28.9,    24.1],     # Right mouth corner (291) — below nose, behind nose
 ], dtype=np.float64)
 
 _POSE_LANDMARK_IDS = [NOSE_TIP, CHIN, LEFT_EYE_OUTER, RIGHT_EYE_OUTER, LEFT_MOUTH, RIGHT_MOUTH]
@@ -86,7 +87,7 @@ _POSE_LANDMARK_IDS = [NOSE_TIP, CHIN, LEFT_EYE_OUTER, RIGHT_EYE_OUTER, LEFT_MOUT
 def _estimate_head_pose(landmarks, img_w: int, img_h: int):
     """
     Estimate head pose (yaw, pitch, roll) using solvePnP.
-    Returns (yaw, pitch, roll) in degrees.
+    Returns (yaw, pitch, roll) in degrees + rotation matrix.
     """
     # Extract 2D image points for the 6 canonical landmarks
     image_points = np.array([
@@ -103,7 +104,7 @@ def _estimate_head_pose(landmarks, img_w: int, img_h: int):
         [0, 0, 1],
     ], dtype=np.float64)
 
-    dist_coeffs = np.zeros((4, 1))  # No lens distortion model
+    dist_coeffs = np.zeros((4, 1))
 
     success, rotation_vec, translation_vec = cv2.solvePnP(
         _CANONICAL_3D_POINTS, image_points, camera_matrix, dist_coeffs,
@@ -132,12 +133,13 @@ def _estimate_head_pose(landmarks, img_w: int, img_h: int):
     pitch_deg = math.degrees(pitch)
     roll_deg = math.degrees(roll)
 
-    # Sanity check: if pitch is outside ±90°, solvePnP hit the 180° ambiguity.
-    # In that case, the rotation is unreliable — fall back to identity (no correction).
-    if abs(pitch_deg) > 90:
-        return 0.0, 0.0, 0.0, np.eye(3)
+    # Sanity check: if any angle is outside ±90°, solvePnP hit a 180° ambiguity.
+    # Fall back to identity (no pose correction) to avoid flipping the face.
+    if abs(pitch_deg) > 90 or abs(roll_deg) > 90:
+        return yaw_deg, pitch_deg, roll_deg, np.eye(3)
 
     return yaw_deg, pitch_deg, roll_deg, rotation_mat
+
 
 
 # ---------------------------------------------------------------------------
