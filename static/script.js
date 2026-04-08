@@ -15,6 +15,13 @@ const ringFg      = $('#ringFg');
 const verdictText = $('#verdictText');
 const traitsList  = $('#traitsList');
 
+// Face viewer elements
+const faceViewer       = $('#faceViewer');
+const originalViewImg  = $('#originalViewImg');
+const annotatedViewImg = $('#annotatedViewImg');
+const btnOriginal      = $('#btnOriginal');
+const btnAnnotated     = $('#btnAnnotated');
+
 let selectedFile = null;
 
 // ---------- Drag & drop ----------
@@ -45,6 +52,7 @@ function handleFile(file) {
   const reader = new FileReader();
   reader.onload = (e) => {
     previewImg.src = e.target.result;
+    originalViewImg.src = e.target.result;
     previewCont.classList.add('visible');
     results.classList.remove('visible');
     errorMsg.classList.remove('visible');
@@ -84,12 +92,20 @@ analyzeBtn.addEventListener('click', async () => {
 
 // ---------- Render results ----------
 function renderResults(data) {
+  // Set annotated image
+  if (data.annotated_image) {
+    annotatedViewImg.src = 'data:image/jpeg;base64,' + data.annotated_image;
+    faceViewer.style.display = 'flex';
+    // Default: show annotated view
+    showAnnotated();
+  }
+
   // Animate score number
   const target = data.score;
   animateNumber(scoreNumber, 0, target, 1200);
 
   // Animate ring
-  const circumference = 2 * Math.PI * 65; // r=65
+  const circumference = 2 * Math.PI * 65;
   const offset = circumference * (1 - target / 10);
   ringFg.style.strokeDasharray = circumference;
   ringFg.style.strokeDashoffset = circumference;
@@ -118,12 +134,30 @@ function renderResults(data) {
   results.classList.add('visible');
 }
 
+// ---------- Face viewer toggle ----------
+function showOriginal() {
+  originalViewImg.classList.add('active');
+  annotatedViewImg.classList.remove('active');
+  btnOriginal.classList.add('active');
+  btnAnnotated.classList.remove('active');
+}
+
+function showAnnotated() {
+  annotatedViewImg.classList.add('active');
+  originalViewImg.classList.remove('active');
+  btnAnnotated.classList.add('active');
+  btnOriginal.classList.remove('active');
+}
+
+btnOriginal.addEventListener('click', showOriginal);
+btnAnnotated.addEventListener('click', showAnnotated);
+
 // ---------- Animate number ----------
 function animateNumber(el, from, to, duration) {
   const start = performance.now();
   const step = (now) => {
     const t = Math.min((now - start) / duration, 1);
-    const ease = 1 - Math.pow(1 - t, 3); // ease-out cubic
+    const ease = 1 - Math.pow(1 - t, 3);
     el.textContent = (from + (to - from) * ease).toFixed(1);
     if (t < 1) requestAnimationFrame(step);
   };

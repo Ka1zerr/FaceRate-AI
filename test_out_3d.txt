@@ -1,0 +1,104 @@
+=== AVERAGE FACE (3D) ===
+{
+  "score": 7.7,
+  "verdict": "Отличные пропорции лица 💎",
+  "traits": [
+    {
+      "name": "FWHR (Ширина лица)",
+      "score": 9.7,
+      "comment": "Модельная ширина лица (Chad)"
+    },
+    {
+      "name": "Canthal Tilt (Глаза)",
+      "score": 4.3,
+      "comment": "Средний угол (Нейтральный)"
+    },
+    {
+      "name": "Hunter Eyes (Разрез)",
+      "score": 7.6,
+      "comment": "Привлекательный узкий прищур"
+    },
+    {
+      "name": "Jawline (Челюсть)",
+      "score": 8.2,
+      "comment": "Хорошие углы нижней челюсти"
+    },
+    {
+      "name": "Нижняя треть",
+      "score": 5.6,
+      "comment": "Средняя длина подбородка"
+    },
+    {
+      "name": "Симметрия",
+      "score": 9.6,
+      "comment": "Идеальная симметрия"
+    }
+  ],
+  "metrics": {
+    "fwhr": 1.976,
+    "jaw_cheek_ratio": 0.953,
+    "canthal_tilt": 1.4,
+    "eye_aspect_ratio": 0.319,
+    "lower_third_ratio": 0.413,
+    "symmetry": 1.0
+  },
+  "head_pose": {
+    "yaw": -2.4,
+    "pitch": 7.9,
+    "roll": -0.6
+  }
+}
+
+=== MODEL FACE (3D) ===
+{
+  "score": 7.7,
+  "verdict": "Отличные пропорции лица 💎",
+  "traits": [
+    {
+      "name": "FWHR (Ширина лица)",
+      "score": 9.3,
+      "comment": "Модельная ширина лица (Chad)"
+    },
+    {
+      "name": "Canthal Tilt (Глаза)",
+      "score": 6.4,
+      "comment": "Средний угол (Нейтральный)"
+    },
+    {
+      "name": "Hunter Eyes (Разрез)",
+      "score": 6.8,
+      "comment": "Обычный разрез глаз"
+    },
+    {
+      "name": "Jawline (Челюсть)",
+      "score": 7.8,
+      "comment": "Хорошие углы нижней челюсти"
+    },
+    {
+      "name": "Нижняя треть",
+      "score": 4.8,
+      "comment": "Средняя длина подбородка"
+    },
+    {
+      "name": "Симметрия",
+      "score": 9.9,
+      "comment": "Идеальная симметрия"
+    }
+  ],
+  "metrics": {
+    "fwhr": 1.922,
+    "jaw_cheek_ratio": 0.969,
+    "canthal_tilt": 3.6,
+    "eye_aspect_ratio": 0.331,
+    "lower_third_ratio": 0.426,
+    "symmetry": 0.989
+  },
+  "head_pose": {
+    "yaw": -17.2,
+    "pitch": 15.4,
+    "roll": -2.7
+  },
+  "quality_warnings": [
+    "Небольшой поворот головы (-17°). Результат может немного отличаться от фронтального."
+  ]
+}

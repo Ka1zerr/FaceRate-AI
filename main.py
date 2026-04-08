@@ -5,6 +5,7 @@ Uses 3D landmark normalization and head pose compensation for accurate
 scoring regardless of camera angle, selfie lens distortion, or head pose.
 """
 
+import base64
 import io
 import math
 from pathlib import Path
@@ -65,6 +66,56 @@ NOSE_BOTTOM = 2
 NOSE_TIP = 1
 LEFT_MOUTH = 61
 RIGHT_MOUTH = 291
+
+# Additional landmarks for improved metrics (v3)
+BROW_INNER_LEFT = 107
+BROW_INNER_RIGHT = 336
+BROW_OUTER_LEFT = 70
+BROW_OUTER_RIGHT = 300
+NOSE_WING_LEFT = 129
+NOSE_WING_RIGHT = 358
+# Multi-point eye aperture (Soukupová & Čech EAR)
+LEFT_EYE_UPPER_1 = 160   # upper lid, near outer
+LEFT_EYE_UPPER_2 = 159   # upper lid, center
+LEFT_EYE_UPPER_3 = 158   # upper lid, near inner
+LEFT_EYE_LOWER_1 = 144   # lower lid, near outer
+LEFT_EYE_LOWER_2 = 145   # lower lid, center
+LEFT_EYE_LOWER_3 = 153   # lower lid, near inner
+RIGHT_EYE_UPPER_1 = 387
+RIGHT_EYE_UPPER_2 = 386
+RIGHT_EYE_UPPER_3 = 385
+RIGHT_EYE_LOWER_1 = 373
+RIGHT_EYE_LOWER_2 = 374
+RIGHT_EYE_LOWER_3 = 380
+# Lip landmarks
+UPPER_LIP_VERMILION = 0   # top of upper lip (cupid's bow)
+LOWER_LIP_VERMILION = 17  # bottom of lower lip
+LIP_UPPER_INNER = 13      # inner edge of upper lip
+LIP_LOWER_INNER = 14      # inner edge of lower lip
+
+# ---------------------------------------------------------------------------
+# Face contour landmark index sequences for visualization
+# ---------------------------------------------------------------------------
+_FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288,
+              397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136,
+              172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109, 10]
+
+_LEFT_EYE = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158,
+             159, 160, 161, 246, 33]
+
+_RIGHT_EYE = [263, 249, 390, 373, 374, 380, 381, 382, 362, 398, 384, 385,
+              386, 387, 388, 466, 263]
+
+_LEFT_EYEBROW = [70, 63, 105, 66, 107, 55, 65, 52, 53, 46]
+_RIGHT_EYEBROW = [300, 293, 334, 296, 336, 285, 295, 282, 283, 276]
+
+_NOSE_BRIDGE = [168, 6, 197, 195, 5, 4, 1]
+_NOSE_BOTTOM = [98, 240, 64, 48, 115, 220, 45, 4, 275, 440, 344, 278, 294, 460, 327]
+
+_LIPS_OUTER = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291,
+               409, 270, 269, 267, 0, 37, 39, 40, 185, 61]
+_LIPS_INNER = [78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308,
+               415, 310, 311, 312, 13, 82, 81, 80, 191, 78]
 
 # Canonical 3D face model points (approximate metric positions in mm)
 # Convention: Y-down (image coordinates), Z-away from camera (into face)
@@ -186,48 +237,102 @@ def _dist3d(pts, a: int, b: int) -> float:
 
 
 def _compute_metrics(pts_3d: np.ndarray):
-    """Return a dict of facial proportion metrics computed from 3D-normalized points."""
+    """Return a dict of facial proportion metrics computed from 3D-normalized points (v3)."""
 
     face_height = _dist3d(pts_3d, FOREHEAD, CHIN)
     bizygomatic_width = _dist3d(pts_3d, LEFT_CHEEK, RIGHT_CHEEK)
     bigonial_width = _dist3d(pts_3d, LEFT_JAW, RIGHT_JAW)
 
-    # 1. FWHR — Facial Width-to-Height Ratio
-    midface_height = abs(pts_3d[BROW_CENTER][1] - pts_3d[UPPER_LIP][1])
+    # 1. FWHR — stabilized with averaged brow Y from 3 points
+    brow_y = float(np.mean([
+        pts_3d[BROW_INNER_LEFT][1],
+        pts_3d[BROW_CENTER][1],
+        pts_3d[BROW_INNER_RIGHT][1],
+    ]))
+    lip_y = pts_3d[UPPER_LIP][1]
+    midface_height = abs(lip_y - brow_y)
     fwhr = bizygomatic_width / midface_height if midface_height > 1e-6 else 0
 
     # 2. Jaw to Cheek ratio
     jaw_cheek_ratio = bigonial_width / bizygomatic_width if bizygomatic_width > 1e-6 else 0
 
-    # 3. Canthal Tilt (computed in 2D XY plane of the corrected face)
-    left_dx = pts_3d[LEFT_EYE_INNER][0] - pts_3d[LEFT_EYE_OUTER][0]
-    left_dy = pts_3d[LEFT_EYE_INNER][1] - pts_3d[LEFT_EYE_OUTER][1]
-    left_tilt = math.degrees(math.atan2(left_dy, abs(left_dx))) if abs(left_dx) > 1e-6 else 0
+    # 3. Canthal Tilt (in XY plane of corrected face)
+    def _eye_tilt(outer_idx, inner_idx):
+        dx = pts_3d[inner_idx][0] - pts_3d[outer_idx][0]
+        dy = pts_3d[inner_idx][1] - pts_3d[outer_idx][1]
+        return math.degrees(math.atan2(dy, abs(dx))) if abs(dx) > 1e-6 else 0.0
 
-    right_dx = pts_3d[RIGHT_EYE_INNER][0] - pts_3d[RIGHT_EYE_OUTER][0]
-    right_dy = pts_3d[RIGHT_EYE_INNER][1] - pts_3d[RIGHT_EYE_OUTER][1]
-    right_tilt = math.degrees(math.atan2(right_dy, abs(right_dx))) if abs(right_dx) > 1e-6 else 0
+    canthal_tilt = (_eye_tilt(LEFT_EYE_OUTER, LEFT_EYE_INNER)
+                    + _eye_tilt(RIGHT_EYE_OUTER, RIGHT_EYE_INNER)) / 2.0
 
-    canthal_tilt = (left_tilt + right_tilt) / 2
+    # 4. Eye Aspect Ratio — 3-pair EAR (Soukupová & Čech, more robust)
+    def _ear_3pt(outer, inner, uppers, lowers):
+        w = float(np.linalg.norm(pts_3d[outer] - pts_3d[inner]))
+        if w < 1e-6:
+            return 0.0
+        verts = [float(np.linalg.norm(pts_3d[u] - pts_3d[l]))
+                 for u, l in zip(uppers, lowers)]
+        return float(np.mean(verts)) / w
 
-    # 4. Eye Aspect Ratio
-    left_eye_w = _dist3d(pts_3d, LEFT_EYE_INNER, LEFT_EYE_OUTER)
-    left_eye_h = _dist3d(pts_3d, LEFT_EYE_TOP, LEFT_EYE_BOTTOM)
-    right_eye_w = _dist3d(pts_3d, RIGHT_EYE_INNER, RIGHT_EYE_OUTER)
-    right_eye_h = _dist3d(pts_3d, RIGHT_EYE_TOP, RIGHT_EYE_BOTTOM)
+    left_ear = _ear_3pt(
+        LEFT_EYE_OUTER, LEFT_EYE_INNER,
+        [LEFT_EYE_UPPER_1, LEFT_EYE_UPPER_2, LEFT_EYE_UPPER_3],
+        [LEFT_EYE_LOWER_1, LEFT_EYE_LOWER_2, LEFT_EYE_LOWER_3],
+    )
+    right_ear = _ear_3pt(
+        RIGHT_EYE_OUTER, RIGHT_EYE_INNER,
+        [RIGHT_EYE_UPPER_1, RIGHT_EYE_UPPER_2, RIGHT_EYE_UPPER_3],
+        [RIGHT_EYE_LOWER_1, RIGHT_EYE_LOWER_2, RIGHT_EYE_LOWER_3],
+    )
+    eye_aspect_ratio = (left_ear + right_ear) / 2.0
 
-    eye_aspect_ratio = 0
-    if left_eye_w > 1e-6 and right_eye_w > 1e-6:
-        eye_aspect_ratio = ((left_eye_h / left_eye_w) + (right_eye_h / right_eye_w)) / 2
+    # 5. Lower Third (Chin-to-Philtrum Ratio)
+    # Replaced full face height (cannot be measured accurately without hairline)
+    # with the standard Chin vs Philtrum ratio. Ideal is ~2.25 (chin is 2x+ longer).
+    philtrum = abs(pts_3d[NOSE_BOTTOM][1] - pts_3d[UPPER_LIP][1])
+    chin_len = abs(pts_3d[LOWER_LIP_VERMILION][1] - pts_3d[CHIN][1])
+    lower_third_ratio = chin_len / philtrum if philtrum > 1e-6 else 0
+    # 6. Symmetry — 7 bilateral landmark pairs (much more robust)
+    _sym_pairs = [
+        (LEFT_EYE_OUTER, RIGHT_EYE_OUTER),
+        (LEFT_EYE_INNER, RIGHT_EYE_INNER),
+        (LEFT_CHEEK, RIGHT_CHEEK),
+        (LEFT_JAW, RIGHT_JAW),
+        (LEFT_MOUTH, RIGHT_MOUTH),
+        (BROW_OUTER_LEFT, BROW_OUTER_RIGHT),
+        (NOSE_WING_LEFT, NOSE_WING_RIGHT),
+    ]
+    midline = pts_3d[NOSE_TIP]
+    sym_ratios = []
+    for l_idx, r_idx in _sym_pairs:
+        d_l = float(np.linalg.norm(pts_3d[l_idx] - midline))
+        d_r = float(np.linalg.norm(pts_3d[r_idx] - midline))
+        if max(d_l, d_r) > 1e-6:
+            sym_ratios.append(min(d_l, d_r) / max(d_l, d_r))
+    symmetry = float(np.mean(sym_ratios)) if sym_ratios else 1.0
 
-    # 5. Lower Third
-    nose_chin = _dist3d(pts_3d, NOSE_BOTTOM, CHIN)
-    lower_third_ratio = nose_chin / face_height if face_height > 1e-6 else 0
+    # 7. NEW — Facial Thirds Balance (0..1, 1 = perfect)
+    # NOTE: Only compare middle and lower thirds — the upper third
+    # (hairline to brow) cannot be measured reliably from face mesh
+    # because landmark 10 is NOT the hairline, it's top of the mesh.
+    middle_third = abs(brow_y - pts_3d[NOSE_BOTTOM][1])
+    lower_third = abs(pts_3d[NOSE_BOTTOM][1] - pts_3d[CHIN][1])
+    ml_total = middle_third + lower_third
+    if ml_total > 1e-6:
+        mid_ratio = middle_third / ml_total  # ideal ≈ 0.50
+        thirds_balance = max(0.0, 1.0 - abs(mid_ratio - 0.50) * 4)
+    else:
+        thirds_balance = 0.5
 
-    # 6. Symmetry (3D — much more robust than 2D)
-    left_sym = _dist3d(pts_3d, NOSE_TIP, LEFT_CHEEK)
-    right_sym = _dist3d(pts_3d, NOSE_TIP, RIGHT_CHEEK)
-    symmetry = min(left_sym, right_sym) / max(left_sym, right_sym) if max(left_sym, right_sym) > 1e-6 else 1.0
+    # 8. NEW — Nose Width Ratio (nose width / interocular distance)
+    nose_width = _dist3d(pts_3d, NOSE_WING_LEFT, NOSE_WING_RIGHT)
+    interocular = _dist3d(pts_3d, LEFT_EYE_INNER, RIGHT_EYE_INNER)
+    nose_width_ratio = nose_width / interocular if interocular > 1e-6 else 0
+
+    # 9. NEW — Lip Fullness (total lip height / lower third height)
+    lip_upper_h = _dist3d(pts_3d, UPPER_LIP_VERMILION, LIP_UPPER_INNER)
+    lip_lower_h = _dist3d(pts_3d, LIP_LOWER_INNER, LOWER_LIP_VERMILION)
+    lip_fullness = (lip_upper_h + lip_lower_h) / lower_third if lower_third > 1e-6 else 0
 
     return {
         "fwhr": round(fwhr, 3),
@@ -236,115 +341,252 @@ def _compute_metrics(pts_3d: np.ndarray):
         "eye_aspect_ratio": round(eye_aspect_ratio, 3),
         "lower_third_ratio": round(lower_third_ratio, 3),
         "symmetry": round(symmetry, 3),
+        "thirds_balance": round(thirds_balance, 3),
+        "nose_width_ratio": round(nose_width_ratio, 3),
+        "lip_fullness": round(lip_fullness, 3),
     }
 
 
 # ---------------------------------------------------------------------------
-# Statistical Scoring
+# Landmark Visualization
 # ---------------------------------------------------------------------------
-def _map_stat(val: float, avg: float, ideal: float, sd: float) -> float:
+def _draw_landmarks_on_image(img_np: np.ndarray, landmarks, metrics: dict) -> str:
     """
-    Map a biometric value to a 1.0 - 10.0 score based on population statistics.
-    Average maps exactly to 5.0. Ideal maps exactly to 10.0.
-    Standard deviation determines how fast the score drops.
+    Draw face mesh, contours, and measurement lines on the image.
+    Returns base64-encoded JPEG string.
     """
-    if ideal > avg:
-        if val >= ideal:
-            overshoot = (val - ideal) / sd
-            s = 10.0 - (overshoot * 1.5)
-        elif val >= avg:
-            s = 5.0 + 5.0 * ((val - avg) / (ideal - avg))
-        else:
-            undershoot = (avg - val) / sd
-            s = 5.0 - (undershoot * 2.0)
-    else:
-        # Smaller is better
-        if val <= ideal:
-            overshoot = (ideal - val) / sd
-            s = 10.0 - (overshoot * 1.5)
-        elif val <= avg:
-            s = 5.0 + 5.0 * ((avg - val) / (avg - ideal))
-        else:
-            undershoot = (val - avg) / sd
-            s = 5.0 - (undershoot * 2.0)
+    canvas = img_np.copy()
+    h, w = canvas.shape[:2]
 
-    return max(1.0, min(10.0, s))
+    # Helper: landmark -> pixel coords
+    def lm2px(idx):
+        lm = landmarks[idx]
+        return int(lm.x * w), int(lm.y * h)
+
+    # Scale factor for line thickness based on image size
+    sf = max(1, int(min(w, h) / 500))
+
+    # --- 1. Draw all 478 mesh dots (subtle) ---
+    for i in range(len(landmarks)):
+        px, py = lm2px(i)
+        cv2.circle(canvas, (px, py), max(1, sf // 2), (0, 220, 220), -1)
+
+    # --- 2. Draw contours ---
+    def draw_contour(indices, color, thickness=None):
+        t = thickness or max(1, sf)
+        pts = [lm2px(i) for i in indices]
+        for j in range(len(pts) - 1):
+            cv2.line(canvas, pts[j], pts[j + 1], color, t, cv2.LINE_AA)
+
+    # Face oval — white
+    draw_contour(_FACE_OVAL, (255, 255, 255), max(1, sf))
+    # Eyes — green
+    draw_contour(_LEFT_EYE, (0, 255, 170), max(1, sf + 1))
+    draw_contour(_RIGHT_EYE, (0, 255, 170), max(1, sf + 1))
+    # Eyebrows — yellow
+    draw_contour(_LEFT_EYEBROW, (0, 230, 255), max(1, sf))
+    draw_contour(_RIGHT_EYEBROW, (0, 230, 255), max(1, sf))
+    # Nose — light blue
+    draw_contour(_NOSE_BRIDGE, (255, 200, 100), max(1, sf))
+    draw_contour(_NOSE_BOTTOM, (255, 200, 100), max(1, sf))
+    # Lips — magenta/pink
+    draw_contour(_LIPS_OUTER, (180, 100, 255), max(1, sf + 1))
+    draw_contour(_LIPS_INNER, (180, 100, 255), max(1, sf))
+
+    # --- 3. Draw measurement lines ---
+    line_color = (0, 180, 255)  # orange in BGR
+    label_color = (0, 180, 255)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = max(0.35, sf * 0.3)
+    t_line = max(1, sf)
+
+    def draw_measurement(idx_a, idx_b, label, offset=(0, -8)):
+        pa, pb = lm2px(idx_a), lm2px(idx_b)
+        cv2.line(canvas, pa, pb, line_color, t_line, cv2.LINE_AA)
+        # Small markers at endpoints
+        cv2.circle(canvas, pa, max(2, sf + 1), line_color, -1)
+        cv2.circle(canvas, pb, max(2, sf + 1), line_color, -1)
+        # Label at midpoint
+        mx = (pa[0] + pb[0]) // 2 + offset[0]
+        my = (pa[1] + pb[1]) // 2 + offset[1]
+        cv2.putText(canvas, label, (mx, my), font, font_scale, (0, 0, 0), max(1, sf + 2), cv2.LINE_AA)
+        cv2.putText(canvas, label, (mx, my), font, font_scale, label_color, max(1, sf), cv2.LINE_AA)
+
+    # FWHR — bizygomatic width
+    draw_measurement(LEFT_CHEEK, RIGHT_CHEEK,
+                     f"FWHR {metrics['fwhr']}", offset=(0, -10 * sf))
+
+    # Jaw width
+    draw_measurement(LEFT_JAW, RIGHT_JAW,
+                     f"Jaw {metrics['jaw_cheek_ratio']}", offset=(0, 8 * sf))
+
+    # Face height (forehead to chin)
+    draw_measurement(FOREHEAD, CHIN,
+                     f"H", offset=(8 * sf, 0))
+
+    # Canthal tilt — eye corners
+    draw_measurement(LEFT_EYE_OUTER, LEFT_EYE_INNER,
+                     f"{metrics['canthal_tilt']}\xb0", offset=(0, -6 * sf))
+    draw_measurement(RIGHT_EYE_OUTER, RIGHT_EYE_INNER,
+                     f"{metrics['canthal_tilt']}\xb0", offset=(0, -6 * sf))
+
+    # Nose width
+    draw_measurement(NOSE_WING_LEFT, NOSE_WING_RIGHT,
+                     f"Nose {metrics['nose_width_ratio']}", offset=(0, 6 * sf))
+
+    # Lip height
+    draw_measurement(UPPER_LIP_VERMILION, LOWER_LIP_VERMILION,
+                     f"Lip {metrics['lip_fullness']}", offset=(8 * sf, 0))
+
+    # --- 4. Encode to base64 JPEG ---
+    canvas_bgr = cv2.cvtColor(canvas, cv2.COLOR_RGB2BGR)
+    _, buf = cv2.imencode('.jpg', canvas_bgr, [cv2.IMWRITE_JPEG_QUALITY, 88])
+    b64 = base64.b64encode(buf).decode('ascii')
+    return b64
+
+
+# ---------------------------------------------------------------------------
+# Asymmetric Gaussian Scoring (v4)
+# ---------------------------------------------------------------------------
+def _score_gauss(val: float, ideal: float, sigma_lo: float, sigma_hi: float) -> float:
+    """
+    Score a metric value on a 1-10 scale using an asymmetric Gaussian
+    centered on the ideal value.
+
+    - Exactly at ideal -> 10.0
+    - sigma_lo: tolerance for values BELOW ideal (tighter = harsher)
+    - sigma_hi: tolerance for values ABOVE ideal (wider = more forgiving)
+    """
+    sigma = sigma_hi if val >= ideal else sigma_lo
+    z = (val - ideal) / sigma
+    raw = math.exp(-0.5 * z * z)
+    return round(max(1.0, 1.0 + 9.0 * raw), 1)
+
+
+# Metric definitions: (ideal, sigma_below, sigma_above)
+_METRIC_PARAMS = {
+    # Relaxed FWHR & Jaw to not destroy "pretty boy / TikTok" aesthetics
+    "fwhr":              (  1.90,  0.22,  0.50),  # ideal slightly lower, much more forgiving to narrow faces
+    "canthal_tilt":      (  7.0,   3.5,   5.0 ),  # positive tilt good
+    "eye_aspect_ratio":  (  0.27,  0.08,  0.06),  # narrower better
+    "jaw_cheek_ratio":   (  0.84,  0.08,  0.15),  # slightly narrower ideal, forgiving to diamond jawlines
+    "lower_third_ratio": (  2.50,  0.40,  2.50),  # chin-to-philtrum ratio
+    "symmetry":          (  1.00,  0.04,  0.10),
+    "thirds_balance":    (  1.00,  0.15,  0.10),
+    "nose_width_ratio":  (  1.00,  0.15,  0.25),
+    "lip_fullness":      (  0.35,  0.08,  0.12),
+}
+
+_TRAIT_INFO = {
+    "fwhr": {
+        "name": "FWHR (Ширина лица)",
+        9: "Модельная ширина лица",
+        7: "Хорошая ширина",
+        4: "Средние пропорции",
+        0: "Узкое лицо",
+    },
+    "canthal_tilt": {
+        "name": "Canthal Tilt (Наклон глаз)",
+        9: "Хищный позитивный наклон",
+        7: "Привлекательный позитивный наклон",
+        4: "Нейтральный угол",
+        0: "Опущенные уголки (Prey eyes)",
+    },
+    "eye_aspect_ratio": {
+        "name": "Hunter Eyes (Разрез)",
+        9: "Настоящие Hunter Eyes",
+        7: "Узкий привлекательный прищур",
+        4: "Обычный разрез глаз",
+        0: "Круглые глаза (Bug eyes)",
+    },
+    "jaw_cheek_ratio": {
+        "name": "Jawline (Челюсть)",
+        9: "Мощная квадратная челюсть",
+        7: "Хорошие углы челюсти",
+        4: "Обычная челюсть",
+        0: "Узкая челюсть (Рецессия)",
+    },
+    "lower_third_ratio": {
+        "name": "Нижняя треть",
+        9: "Идеальная проекция подбородка",
+        7: "Хорошая длина подбородка",
+        4: "Средний подбородок",
+        0: "Отклонение от идеала",
+    },
+    "symmetry": {
+        "name": "Симметрия",
+        9: "Идеальная симметрия",
+        7: "Высокая симметрия",
+        4: "Средняя симметрия",
+        0: "Заметная асимметрия",
+    },
+    "thirds_balance": {
+        "name": "Баланс третей",
+        9: "Идеальный баланс третей",
+        7: "Хорошие пропорции третей",
+        4: "Средний баланс",
+        0: "Непропорциональные трети",
+    },
+    "nose_width_ratio": {
+        "name": "Нос (Ширина)",
+        9: "Модельно пропорциональный нос",
+        7: "Аккуратная ширина носа",
+        4: "Средняя ширина носа",
+        0: "Широкий нос",
+    },
+    "lip_fullness": {
+        "name": "Губы (Полнота)",
+        9: "Выразительные полные губы",
+        7: "Привлекательная полнота",
+        4: "Средние губы",
+        0: "Тонкие губы",
+    },
+}
+
+
+def _get_comment(info: dict, score: float) -> str:
+    if score >= 9.0: return info[9]
+    if score >= 7.0: return info[7]
+    if score >= 4.0: return info[4]
+    return info[0]
 
 
 def _score_from_metrics(m: dict) -> tuple[float, dict[str, dict]]:
-    """Produce a composite score evaluating 'looksmaxxing' traits against population averages."""
+    """Produce a composite score with 9 Gaussian-scored metrics (v4)."""
     traits: dict[str, dict] = {}
+    scores: list[float] = []
 
-    # 1. FWHR | Avg: 1.75, Ideal: 1.95, SD: 0.12
-    fwhr = m["fwhr"]
-    s_fwhr = _map_stat(fwhr, avg=1.75, ideal=1.95, sd=0.12)
+    metric_keys = [
+        "fwhr", "canthal_tilt", "eye_aspect_ratio", "jaw_cheek_ratio",
+        "lower_third_ratio", "symmetry", "thirds_balance",
+        "nose_width_ratio", "lip_fullness",
+    ]
+    weights = [0.16, 0.12, 0.12, 0.16, 0.08, 0.12, 0.08, 0.08, 0.08]
 
-    if s_fwhr >= 9.0: comment = "Модельная ширина лица (Chad)"
-    elif s_fwhr >= 7.0: comment = "Хорошая ширина"
-    elif s_fwhr >= 4.0: comment = "Средние пропорции"
-    else: comment = "Лицо слишком узкое"
-    traits["FWHR (Ширина лица)"] = {"score": round(s_fwhr, 1), "comment": comment, "value": fwhr}
+    for key in metric_keys:
+        ideal, s_lo, s_hi = _METRIC_PARAMS[key]
+        val = m[key]
+        s = _score_gauss(val, ideal, s_lo, s_hi)
+        scores.append(s)
 
-    # 2. Canthal Tilt | Avg: 2.5°, Ideal: 6.5°, SD: 3.0°
-    tilt = m["canthal_tilt"]
-    s_tilt = _map_stat(tilt, avg=2.5, ideal=6.5, sd=3.0)
+        info = _TRAIT_INFO[key]
+        traits[info["name"]] = {
+            "score": s,
+            "comment": _get_comment(info, s),
+            "value": val,
+        }
 
-    if s_tilt >= 9.0: comment = "Острый позитивный наклон (Хищный взгляд)"
-    elif s_tilt >= 7.0: comment = "Легкий позитивный наклон"
-    elif s_tilt >= 4.0: comment = "Средний угол (Нейтральный)"
-    else: comment = "Опущенные уголки (Prey eyes)"
-    traits["Canthal Tilt (Глаза)"] = {"score": round(s_tilt, 1), "comment": comment, "value": tilt}
-
-    # 3. Hunter Eyes (Eye Aspect Ratio) | Avg: 0.36, Ideal: 0.28, SD: 0.05
-    ear = m["eye_aspect_ratio"]
-    s_ear = _map_stat(ear, avg=0.36, ideal=0.28, sd=0.05)
-
-    if s_ear >= 9.0: comment = "Настоящие Hunter Eyes"
-    elif s_ear >= 7.0: comment = "Привлекательный узкий прищур"
-    elif s_ear >= 4.0: comment = "Обычный разрез глаз"
-    else: comment = "Слишком круглые глаза (Bug eyes)"
-    traits["Hunter Eyes (Разрез)"] = {"score": round(s_ear, 1), "comment": comment, "value": ear}
-
-    # 4. Jaw to Cheek Ratio | Avg: 0.78, Ideal: 0.88, SD: 0.06
-    jcr = m["jaw_cheek_ratio"]
-    s_jcr = _map_stat(jcr, avg=0.78, ideal=0.88, sd=0.06)
-
-    if s_jcr >= 9.0: comment = "Мощная квадратная челюсть"
-    elif s_jcr >= 7.0: comment = "Хорошие углы нижней челюсти"
-    elif s_jcr >= 4.0: comment = "Обычная челюсть"
-    else: comment = "Узкая челюсть (Рецессия)"
-    traits["Jawline (Челюсть)"] = {"score": round(s_jcr, 1), "comment": comment, "value": jcr}
-
-    # 5. Lower Third Ratio | Avg: 0.33, Ideal: 0.34, SD: 0.025
-    lt = m["lower_third_ratio"]
-    s_lt = _map_stat(lt, avg=0.33, ideal=0.34, sd=0.025)
-
-    if s_lt >= 9.0: comment = "Идеальный массивный подбородок"
-    elif s_lt >= 7.0: comment = "Хорошая проекция подбородка"
-    elif s_lt >= 4.0: comment = "Средняя длина подбородка"
-    else: comment = "Укороченный подбородок"
-    traits["Нижняя треть"] = {"score": round(s_lt, 1), "comment": comment, "value": lt}
-
-    # 6. Symmetry | Avg: 0.93, Ideal: 0.99, SD: 0.035
-    sym = m["symmetry"]
-    s_sym = _map_stat(sym, avg=0.93, ideal=0.99, sd=0.035)
-
-    if s_sym >= 9.0: comment = "Идеальная симметрия"
-    elif s_sym >= 7.0: comment = "Высокая симметрия"
-    elif s_sym >= 4.0: comment = "Средняя симметрия"
-    else: comment = "Заметная асимметрия"
-    traits["Симметрия"] = {"score": round(s_sym, 1), "comment": comment, "value": sym}
-
-    # Composite — weighted average with softer penalty
-    scores = [s_fwhr, s_tilt, s_ear, s_jcr, s_lt, s_sym]
-    weights = [0.22, 0.15, 0.15, 0.22, 0.12, 0.14]
-
+    # Composite — weighted average
     base_score = sum(s * w for s, w in zip(scores, weights))
 
-    # Softer non-linear penalty for weak core features
-    min_core = min(s_fwhr, s_jcr, s_ear)
-    if min_core < 5.0:
-        base_score -= (5.0 - min_core) * 0.3
+    # Penalty if any core trait (FWHR, jaw, eyes) is extremely weak
+    min_core = min(scores[0], scores[2], scores[3])
+    if min_core < 4.0:
+        base_score -= (4.0 - min_core) * 0.15
+
+    # Consistency bonus — all traits above 7
+    if min(scores) >= 7.0:
+        base_score += 0.3
 
     composite = round(max(1.0, min(10.0, base_score)), 1)
     return composite, traits
@@ -416,6 +658,9 @@ async def analyze(file: UploadFile = File(...)):
         score, traits = _score_from_metrics(metrics)
         verdict_text = _verdict(score)
 
+        # Generate annotated image with landmarks
+        annotated_b64 = _draw_landmarks_on_image(img_np, landmarks, metrics)
+
         traits_list = []
         for name, info in traits.items():
             traits_list.append(
@@ -436,6 +681,7 @@ async def analyze(file: UploadFile = File(...)):
                 "pitch": round(pitch, 1),
                 "roll": round(roll, 1),
             },
+            "annotated_image": annotated_b64,
         }
 
         if quality_warnings:

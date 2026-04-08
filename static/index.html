@@ -13,7 +13,7 @@
     rel="stylesheet">
   <link href="https://db.onlinewebfonts.com/c/ef1fa16fbd9b3b8431e5138f6d49cb00?family=Rodchenko" rel="stylesheet"
     type="text/css" />
-  <link rel="stylesheet" href="style.css?v=3" />
+  <link rel="stylesheet" href="style.css?v=4" />
 </head>
 
 <body>
@@ -52,6 +52,19 @@
 
       <!-- Results -->
       <div class="results" id="results">
+
+        <!-- Annotated face viewer -->
+        <div class="face-viewer" id="faceViewer">
+          <div class="face-viewer-images">
+            <img class="face-viewer-img" id="originalViewImg" alt="original" />
+            <img class="face-viewer-img" id="annotatedViewImg" alt="annotated" />
+          </div>
+          <div class="face-viewer-toggle">
+            <button class="toggle-btn active" id="btnOriginal" type="button">Оригинал</button>
+            <button class="toggle-btn" id="btnAnnotated" type="button">ИИ-анализ</button>
+          </div>
+        </div>
+
         <!-- Score ring -->
         <div class="score-ring">
           <svg viewBox="0 0 140 140">
